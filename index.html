@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IKEA Catalog Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="hero">
+    <img class="hero-art" src="assets/ikeart.png" alt="">
+    <div class="hero-fade" aria-hidden="true"></div>
+    <div class="hero-inner">
+      <div class="hero-content">
+        <span class="hero-eyebrow">
+          <span class="hero-eyebrow-line"></span>
+          AI-powered catalog
+        </span>
+        <h1 class="hero-title">Find what you're<br><strong>looking for</strong></h1>
+        <p class="hero-lead">Search IKEA's product catalog using natural language. Powered by semantic embeddings.</p>
+      </div>
+    </div>
+  </header>
+
+  <section class="search-section">
+    <form class="search-form" id="search-form" role="search">
+      <input
+        class="search-input"
+        id="search-input"
+        type="search"
+        placeholder="e.g. comfortable reading chair…"
+        autocomplete="off"
+        aria-label="Search IKEA products"
+      >
+      <button class="btn btn-primary" type="submit">Search</button>
+    </form>
+  </section>
+
+  <main class="results-shell fog-environment">
+    <div class="results-header" id="results-header" hidden>
+      <span class="section-label" id="results-label">All products</span>
+      <div class="results-rule" aria-hidden="true"></div>
+    </div>
+    <div class="progress-wrap" id="progress-wrap" hidden>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <span class="progress-label" id="progress-label">Loading catalog…</span>
+    </div>
+    <div class="products-grid" id="products-grid" role="list" aria-label="Product catalog"></div>
+    <div class="empty-state" id="empty-state" hidden>
+      <p>No results found. Try a different search.</p>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <span class="footer-brand">IKEA CATALOG</span>
+      <span class="footer-copy">TC1043.570 – Equipo 3</span>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
