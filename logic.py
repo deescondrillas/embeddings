@@ -1,7 +1,11 @@
-# pip install sentence-transformers "pymilvus[model,milvus_lite]"
+# pip install kaggle kagglehub
 
+# export KAGGLE_USERNAME=
+# export KAGGLE_KEY=
 import pandas as pd
+import numpy as np
 import kagglehub
+import threading
 
 from sentence_transformers import SentenceTransformer
 from pymilvus import MilvusClient, DataType
@@ -14,80 +18,122 @@ EMBEDDING_DIM   = 768
 VARCHAR_MAX     = 512
 DEFAULT_TOP_N   = 24
 
-embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-client = MilvusClient(DB_PATH)
+_progress  = {"stage": "starting", "pct": 0, "label": "Starting…", "ready": False, "error": None}
+_init_done = threading.Event()
+_client    = None
+_model     = None
 
-if not client.has_collection(COLLECTION_NAME):
-    file_path = "ikea.csv"
-    df = kagglehub.dataset_load(KaggleDatasetAdapter.PANDAS, "thedevastator/ikea-product", file_path)
-    print(f"Dataset loaded: {len(df)} products")
 
-    df = df[["item_id", "name", "category", "price", "short_description", "link"]].copy()
-    df = df.groupby(
-        ["item_id", "name", "price", "short_description", "link"], as_index=False
-    )["category"].agg(lambda x: ", ".join(x.unique()))
+def get_progress():
+    return dict(_progress)
 
-    df = df.dropna(subset=["name", "short_description"], how="all").reset_index(drop=True)
-    for col in ["name", "category", "short_description", "link"]:
-        df[col] = df[col].fillna("").astype(str).str[:VARCHAR_MAX]
-    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0).astype(float)
-    df["text"] = df["name"] + " " + df["short_description"]
 
-    print(f"After cleaning: {len(df)} products")
+def _set(stage, pct, label):
+    _progress.update({"stage": stage, "pct": pct, "label": label})
 
-    embeddings = embedding_model.encode(
-        df["text"].tolist(), show_progress_bar=True, convert_to_numpy=True
-    )
-    print(f"Embedding shape: {embeddings.shape}")
 
-    schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
-    schema.add_field("product_id", DataType.INT64, is_primary=True)
-    schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM)
-    schema.add_field("name", DataType.VARCHAR, max_length=VARCHAR_MAX)
-    schema.add_field("category", DataType.VARCHAR, max_length=VARCHAR_MAX)
-    schema.add_field("short_description", DataType.VARCHAR, max_length=VARCHAR_MAX)
-    schema.add_field("link", DataType.VARCHAR, max_length=VARCHAR_MAX)
-    schema.add_field("price", DataType.FLOAT)
+def _init():
+    global _client, _model
+    try:
+        _set("model", 5, "Loading embedding model…")
+        _model = SentenceTransformer(EMBEDDING_MODEL)
 
-    index_params = client.prepare_index_params()
-    index_params.add_index(
-        field_name="embedding",
-        index_type="HNSW",
-        metric_type="COSINE",
-        params={"M": 16, "efConstruction": 200},
-    )
+        _set("db", 18, "Connecting to database…")
+        _client = MilvusClient(DB_PATH)
 
-    client.create_collection(
-        collection_name=COLLECTION_NAME,
-        schema=schema,
-        index_params=index_params,
-    )
-    print(f"Collection '{COLLECTION_NAME}' created.")
+        if not _client.has_collection(COLLECTION_NAME):
+            _set("download", 22, "Downloading IKEA dataset…")
+            df = kagglehub.dataset_load(
+                KaggleDatasetAdapter.PANDAS, "thedevastator/ikea-product", "ikea.csv"
+            )
 
-    records = [
-        {
-            "product_id": int(row["item_id"]),
-            "embedding": embeddings[idx].tolist(),
-            "name": row["name"],
-            "category": row["category"],
-            "short_description": row["short_description"],
-            "link": row["link"],
-            "price": float(row["price"]),
-        }
-        for idx, row in df.iterrows()
-    ]
+            _set("clean", 36, f"Cleaning {len(df)} products…")
+            df = df[["item_id", "name", "category", "price", "short_description", "link"]].copy()
+            df = df.groupby(
+                ["item_id", "name", "price", "short_description", "link"], as_index=False
+            )["category"].agg(lambda x: ", ".join(x.unique()))
+            df = df.dropna(subset=["name", "short_description"], how="all").reset_index(drop=True)
+            for col in ["name", "category", "short_description", "link"]:
+                df[col] = df[col].fillna("").astype(str).str[:VARCHAR_MAX]
+            df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0).astype(float)
+            df["text"]  = df["name"] + " " + df["short_description"]
 
-    client.insert(collection_name=COLLECTION_NAME, data=records)
-    print(f"{len(records)} records inserted.")
+            # Encode in batches so the frontend can show real progress (45% → 80%)
+            texts      = df["text"].tolist()
+            total      = len(texts)
+            batch_size = 64
+            chunks     = []
+            for i in range(0, total, batch_size):
+                chunks.append(
+                    _model.encode(texts[i : i + batch_size],
+                                  show_progress_bar=False, convert_to_numpy=True)
+                )
+                done = min(i + batch_size, total)
+                _set("embed", 45 + int(done / total * 35),
+                     f"Computing embeddings… {done} / {total}")
+            embeddings = np.vstack(chunks)
+
+            _set("schema", 82, "Creating collection…")
+            schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
+            schema.add_field("product_id",        DataType.INT64,         is_primary=True)
+            schema.add_field("embedding",         DataType.FLOAT_VECTOR,  dim=EMBEDDING_DIM)
+            schema.add_field("name",              DataType.VARCHAR,        max_length=VARCHAR_MAX)
+            schema.add_field("category",          DataType.VARCHAR,        max_length=VARCHAR_MAX)
+            schema.add_field("short_description", DataType.VARCHAR,        max_length=VARCHAR_MAX)
+            schema.add_field("link",              DataType.VARCHAR,        max_length=VARCHAR_MAX)
+            schema.add_field("price",             DataType.FLOAT)
+
+            index_params = _client.prepare_index_params()
+            index_params.add_index(
+                field_name="embedding",
+                index_type="HNSW",
+                metric_type="COSINE",
+                params={"M": 16, "efConstruction": 200},
+            )
+            _client.create_collection(
+                collection_name=COLLECTION_NAME,
+                schema=schema,
+                index_params=index_params,
+            )
+
+            _set("insert", 90, f"Inserting {len(df)} records…")
+            records = [
+                {
+                    "product_id":        int(row["item_id"]),
+                    "embedding":         embeddings[idx].tolist(),
+                    "name":              row["name"],
+                    "category":          row["category"],
+                    "short_description": row["short_description"],
+                    "link":              row["link"],
+                    "price":             float(row["price"]),
+                }
+                for idx, row in df.iterrows()
+            ]
+            _client.insert(collection_name=COLLECTION_NAME, data=records)
+
+        _set("ready", 100, "Catalog ready")
+        _progress["ready"] = True
+
+    except Exception as e:
+        _progress["error"] = str(e)
+        _progress["label"] = f"Error: {e}"
+    finally:
+        _init_done.set()
+
+
+threading.Thread(target=_init, daemon=True).start()
 
 
 def get_all():
+    _init_done.wait()
+    if _progress.get("error"):
+        raise RuntimeError(_progress["error"])
     try:
-        stats = client.get_collection_stats(COLLECTION_NAME)
+        stats = _client.get_collection_stats(COLLECTION_NAME)
         total = int(stats.get("row_count", 2000))
     except Exception:
         total = 2000
-    results = client.query(
+    results = _client.query(
         collection_name=COLLECTION_NAME,
         filter="product_id > 0",
         output_fields=["product_id", "name", "category", "short_description", "link", "price"],
@@ -97,8 +143,11 @@ def get_all():
 
 
 def search(query: str, n: int = DEFAULT_TOP_N):
-    query_vector = embedding_model.encode([query])[0].tolist()
-    results = client.search(
+    _init_done.wait()
+    if _progress.get("error"):
+        raise RuntimeError(_progress["error"])
+    query_vector = _model.encode([query])[0].tolist()
+    results = _client.search(
         collection_name=COLLECTION_NAME,
         data=[query_vector],
         limit=n,

@@ -52,19 +52,32 @@ document.addEventListener('DOMContentLoaded', () => {
   // ===== PROGRESS BAR =====
   let progressInterval = null;
 
-  function startProgress(label) {
-    const wrap  = document.getElementById('progress-wrap');
-    const fill  = document.getElementById('progress-fill');
-    const lbl   = document.getElementById('progress-label');
+  // Show the bar with a label, no automatic advancement (for real server progress)
+  function showProgress(label) {
+    const wrap   = document.getElementById('progress-wrap');
+    const fill   = document.getElementById('progress-fill');
+    const lbl    = document.getElementById('progress-label');
     const header = document.getElementById('results-header');
-
     header.hidden = true;
     wrap.hidden   = false;
     fill.style.transition = 'none';
     fill.style.width = '0%';
     lbl.textContent = label;
+  }
 
-    // Tick forward in irregular steps — feels organic, stops at 88%
+  // Set an exact percentage and optional label (for real server progress)
+  function setProgress(pct, label) {
+    const fill = document.getElementById('progress-fill');
+    const lbl  = document.getElementById('progress-label');
+    fill.style.transition = 'width 0.4s cubic-bezier(0.22,1,0.36,1)';
+    fill.style.width = pct + '%';
+    if (label) lbl.textContent = label;
+  }
+
+  // Show bar and advance randomly — used for search where we have no real progress signal
+  function startFakeProgress(label) {
+    showProgress(label);
+    const fill = document.getElementById('progress-fill');
     let pct = 0;
     clearInterval(progressInterval);
     progressInterval = setInterval(() => {
@@ -183,30 +196,83 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshGlowDelays();
   }
 
-  // ===== LOAD ALL PRODUCTS =====
-  async function loadAllProducts() {
-    startProgress('Loading catalog…');
+  // ===== SHOW ERROR IN EMPTY STATE =====
+  function showEmptyMessage(msg) {
+    const empty = document.getElementById('empty-state');
+    empty.hidden = false;
+    empty.textContent = msg;
+  }
+
+  // ===== FETCH AND RENDER PRODUCTS (no progress bar side-effects) =====
+  async function fetchAndRenderProducts() {
     try {
       const res = await fetch('/api/products');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       allProducts = data;
-      completeProgress();
       renderResults(allProducts, `All products — ${allProducts.length} items`);
-    } catch (err) {
-      completeProgress();
-      document.getElementById('empty-state').hidden = false;
-      document.getElementById('empty-state').textContent =
-        'Could not load catalog — is the server running?';
+    } catch {
+      showEmptyMessage('Could not load catalog.');
     }
+  }
+
+  // ===== STATUS STREAM (SSE) =====
+  // Opens an EventSource to /api/status and drives the progress bar
+  // with real server-side stage labels and percentages.
+  function openStatusStream() {
+    const es = new EventSource('/api/status');
+
+    es.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      setProgress(data.pct, data.label);
+
+      if (data.error) {
+        es.close();
+        completeProgress();
+        showEmptyMessage(`Server error: ${data.error}`);
+        return;
+      }
+
+      if (data.ready) {
+        es.close();
+        // Hold at 100% briefly, then hide and render
+        setTimeout(() => {
+          completeProgress();
+          fetchAndRenderProducts();
+        }, 600);
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      completeProgress();
+      showEmptyMessage('Lost connection to the server.');
+    };
+  }
+
+  // ===== APP INIT =====
+  // Ping the server first so we can show a clear offline message,
+  // then open the SSE stream for real progress.
+  async function startApp() {
+    showProgress('Connecting to server…');
+
+    try {
+      await fetch('/api/ping', { signal: AbortSignal.timeout(2500) });
+    } catch {
+      completeProgress();
+      showEmptyMessage('Server is offline — run python app.py to start the catalog.');
+      return;
+    }
+
+    openStatusStream();
   }
 
   // ===== SEARCH =====
   // Returns the top-N matches from the API, then appends the remaining
   // cached products (not in results) sorted alphabetically below them.
   async function doSearch(query) {
-    startProgress(`Searching for "${query}"…`);
+    startFakeProgress(`Searching for "${query}"…`);
     document.getElementById('products-grid').innerHTML = '';
     document.getElementById('empty-state').hidden = true;
 
@@ -226,11 +292,9 @@ document.addEventListener('DOMContentLoaded', () => {
         merged,
         `${hits.length} match${hits.length !== 1 ? 'es' : ''} for "${query}"`
       );
-    } catch (err) {
+    } catch {
       completeProgress();
-      document.getElementById('empty-state').hidden = false;
-      document.getElementById('empty-state').textContent =
-        'Something went wrong — is the server running?';
+      showEmptyMessage('Something went wrong — is the server running?');
     }
   }
 
@@ -250,6 +314,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ===== INIT =====
-  loadAllProducts();
+  startApp();
 
 });

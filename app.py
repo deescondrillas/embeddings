@@ -1,8 +1,9 @@
-# pip install flask flask-cors
-
-from flask import Flask, request, jsonify
+# pip install flask flask_cors
+from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
-from logic import search, get_all
+import logic
+import json
+import time
 
 app = Flask(__name__, static_folder=".", static_url_path="")
 CORS(app)
@@ -13,10 +14,31 @@ def index():
     return app.send_static_file("index.html")
 
 
+@app.route("/api/ping")
+def ping_route():
+    return jsonify({"ok": True})
+
+
+@app.route("/api/status")
+def status_route():
+    def generate():
+        while True:
+            p = logic.get_progress()
+            yield f"data: {json.dumps(p)}\n\n"
+            if p.get("ready") or p.get("error"):
+                break
+            time.sleep(0.4)
+    return Response(
+        stream_with_context(generate()),
+        content_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.route("/api/products")
 def products_route():
     try:
-        results = get_all()
+        results = logic.get_all()
         return jsonify([{
             "id":          r["product_id"],
             "name":        r["name"],
@@ -42,7 +64,7 @@ def search_route():
         return products_route()
 
     try:
-        results = search(q, n)
+        results = logic.search(q, n)
         return jsonify([{
             "id":          r["id"],
             "name":        r["entity"]["name"],
@@ -57,4 +79,4 @@ def search_route():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, use_reloader=False, port=5000)
