@@ -3,7 +3,7 @@
 Make sure the following dependencies are installed in your virtual environment:
 
 ```bash
-pip install kagglehub numpy pandas flask flask-cors pymilvus rapidfuzz sentence-transformers
+pip install kagglehub numpy pandas flask flask-cors pymilvus milvus-lite rapidfuzz sentence-transformers
 ```
 then, run the `app.py` file
 
