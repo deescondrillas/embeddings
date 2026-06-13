@@ -21,7 +21,7 @@ _progress   = {"stage": "starting", "pct": 0, "label": "Starting…", "ready": F
 _init_done  = threading.Event()
 _client     = None
 _model      = None
-_name_index = []  # list of all product records, used for fuzzy name search
+_name_index = []
 
 
 def get_progress():

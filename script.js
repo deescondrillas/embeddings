@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let allProducts     = [];
   let searchMode      = 'semantic';
 
-  // ===== SCROLL REVEAL =====
+  // SCROLL REVEAL
   const revealObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }, { threshold: 0.05, rootMargin: '0px 0px -20px 0px' });
 
-  // ===== RIPPLE =====
+  // RIPPLE
   const rippleStyle = document.createElement('style');
   rippleStyle.textContent =
     '@keyframes ripple-expand { to { transform: scale(4.5); opacity: 0; } }';
@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => ripple.remove(), 600);
   });
 
-  // ===== GLOW DELAYS =====
+  // GLOW DELAYS
   function refreshGlowDelays() {
     document.querySelectorAll('.glass-card').forEach((el, i) => {
       el.style.setProperty('--glow-delay', `${(i * 1.3) % 7}s`);
@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ===== PROGRESS BAR =====
+  // PROGRESS BAR
   let progressInterval = null;
 
   function showProgress(label) {
@@ -102,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 450);
   }
 
-  // ===== COLOR UTILITIES =====
+  // COLOR UTILITIES
   // t=0 → #015FA9 (blue, 0% similar)   t=1 → #F8C904 (yellow, 100% similar)
   function getGradientColor(t) {
     t = Math.max(0, Math.min(1, t));
@@ -120,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return (0.299 * r + 0.587 * g + 0.114 * b) > 128 ? 'var(--on-surface)' : '#fff';
   }
 
-  // ===== COLORIZE BOX =====
+  // COLORIZE BOX
   // similarity is cosine distance (0=identical, 1=different); null means no search
   // We convert to actual similarity t = 1 - distance, then tint the wrap background.
   // The box image uses mix-blend-mode:multiply in CSS, so its grayscale shading mixes
@@ -131,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
     wrap.style.background = getGradientColor(t);
   }
 
-  // ===== URL SAFETY =====
+  // URL SAFETY
   function safeUrl(url) {
     try {
       const u = new URL(url);
@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch { return ''; }
   }
 
-  // ===== HTML ESCAPE =====
+  // HTML ESCAPE
   function esc(str) {
     if (!str && str !== 0) return '';
     return String(str)
@@ -150,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/'/g, '&#039;');
   }
 
-  // ===== RENDER PAGE =====
+  // RENDER PAGE
   function renderPage(page) {
     currentPage = page;
     const start        = (page - 1) * PAGE_SIZE;
@@ -202,7 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderPagination(page, currentProducts.length);
   }
 
-  // ===== RENDER PAGINATION =====
+  // RENDER PAGINATION
   function renderPagination(page, total) {
     const totalPages = Math.ceil(total / PAGE_SIZE);
     const container  = document.getElementById('pagination');
@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ===== RENDER RESULTS =====
+  // RENDER RESULTS
   function renderResults(products, labelText) {
     const grid   = document.getElementById('products-grid');
     const header = document.getElementById('results-header');
@@ -257,14 +257,14 @@ document.addEventListener('DOMContentLoaded', () => {
     renderPage(1);
   }
 
-  // ===== SHOW ERROR IN EMPTY STATE =====
+  // SHOW ERROR IN EMPTY STATE
   function showEmptyMessage(msg) {
     const empty = document.getElementById('empty-state');
     empty.hidden = false;
     empty.textContent = msg;
   }
 
-  // ===== FETCH AND RENDER PRODUCTS =====
+  // FETCH AND RENDER PRODUCTS
   async function fetchAndRenderProducts() {
     try {
       const res = await fetch('/api/products');
@@ -278,7 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ===== STATUS STREAM (SSE) =====
+  // STATUS STREAM (SSE)
   function openStatusStream() {
     const es = new EventSource('/api/status');
 
@@ -309,7 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // ===== APP INIT =====
+  // APP INIT
   async function startApp() {
     showProgress('Connecting to server…');
 
@@ -324,7 +324,7 @@ document.addEventListener('DOMContentLoaded', () => {
     openStatusStream();
   }
 
-  // ===== MODE TOGGLE =====
+  // MODE TOGGLE
   document.querySelectorAll('.mode-pill').forEach(pill => {
     pill.addEventListener('click', () => {
       document.querySelectorAll('.mode-pill').forEach(p => p.classList.remove('active'));
@@ -335,7 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ===== SEARCH =====
+  // SEARCH
   async function doSearch(query) {
     const modeLabel = searchMode === 'name' ? 'name' : 'semantic';
     startFakeProgress(`Searching for "${query}"…`);
@@ -363,7 +363,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ===== FORM HANDLER =====
+  // FORM HANDLER
   const form  = document.getElementById('search-form');
   const input = document.getElementById('search-input');
 
@@ -377,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ===== INIT =====
+  // INIT
   startApp();
 
 });
