@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>IKEA Catalog Search</title>
+  <title>IKEA Catalog</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -36,6 +36,10 @@
       >
       <button class="btn btn-primary" type="submit">Search</button>
     </form>
+    <div class="search-mode-toggle" role="group" aria-label="Search mode">
+      <button type="button" class="mode-pill active" data-mode="semantic">Semantic</button>
+      <button type="button" class="mode-pill" data-mode="name">By Name</button>
+    </div>
   </section>
 
   <main class="results-shell fog-environment">
@@ -53,6 +57,7 @@
     <div class="empty-state" id="empty-state" hidden>
       <p>No results found. Try a different search.</p>
     </div>
+    <div class="pagination" id="pagination" hidden></div>
   </main>
 
   <footer class="footer">

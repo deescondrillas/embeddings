@@ -1,7 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
 
-  // All products cached on load — search floats relevant ones to the top
-  let allProducts = [];
+  const PAGE_SIZE = 100;
+  let currentPage     = 1;
+  let currentProducts = [];
+  let allProducts     = [];
+  let searchMode      = 'semantic';
 
   // ===== SCROLL REVEAL =====
   const revealObserver = new IntersectionObserver((entries) => {
@@ -21,8 +24,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.head.appendChild(rippleStyle);
 
   document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.btn');
-    if (!btn) return;
+    const btn = e.target.closest('.btn, .pagination-btn');
+    if (!btn || btn.disabled) return;
     const rect   = btn.getBoundingClientRect();
     const size   = Math.max(rect.width, rect.height);
     const ripple = document.createElement('span');
@@ -52,7 +55,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // ===== PROGRESS BAR =====
   let progressInterval = null;
 
-  // Show the bar with a label, no automatic advancement (for real server progress)
   function showProgress(label) {
     const wrap   = document.getElementById('progress-wrap');
     const fill   = document.getElementById('progress-fill');
@@ -65,7 +67,6 @@ document.addEventListener('DOMContentLoaded', () => {
     lbl.textContent = label;
   }
 
-  // Set an exact percentage and optional label (for real server progress)
   function setProgress(pct, label) {
     const fill = document.getElementById('progress-fill');
     const lbl  = document.getElementById('progress-label');
@@ -74,7 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (label) lbl.textContent = label;
   }
 
-  // Show bar and advance randomly — used for search where we have no real progress signal
   function startFakeProgress(label) {
     showProgress(label);
     const fill = document.getElementById('progress-fill');
@@ -102,19 +102,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 450);
   }
 
+  // ===== COLOR UTILITIES =====
+  // t=0 → #015FA9 (blue, 0% similar)   t=1 → #F8C904 (yellow, 100% similar)
+  function getGradientColor(t) {
+    t = Math.max(0, Math.min(1, t));
+    const r = Math.round(1   + t * 247);
+    const g = Math.round(95  + t * 106);
+    const b = Math.round(169 - t * 165);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  function getChipTextColor(t) {
+    t = Math.max(0, Math.min(1, t));
+    const r = Math.round(1   + t * 247);
+    const g = Math.round(95  + t * 106);
+    const b = Math.round(169 - t * 165);
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 128 ? 'var(--on-surface)' : '#fff';
+  }
+
   // ===== COLORIZE BOX =====
-  // null similarity → IKEA blue (hue ≈ 210°)
-  // otherwise: map arccos(similarity) × 4 onto the color wheel
+  // similarity is cosine distance (0=identical, 1=different); null means no search
+  // We convert to actual similarity t = 1 - distance, then tint the wrap background.
+  // The box image uses mix-blend-mode:multiply in CSS, so its grayscale shading mixes
+  // with the background to produce a naturally shaded colored box.
   function colorize(imgEl, similarity) {
-    let hue;
-    if (similarity == null) {
-      hue = 210;
-    } else {
-      const s = Math.min(Math.max(similarity, 0), 1);
-      hue = Math.acos(s) * (180 / Math.PI) * 4;
-    }
-    imgEl.style.filter =
-      `brightness(0) saturate(100%) invert(1) sepia(1) saturate(3) hue-rotate(${hue.toFixed(1)}deg)`;
+    const wrap = imgEl.closest('.product-img-wrap');
+    const t = similarity == null ? 0 : Math.max(0, Math.min(1, 1 - similarity));
+    wrap.style.background = getGradientColor(t);
   }
 
   // ===== URL SAFETY =====
@@ -136,31 +150,19 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/'/g, '&#039;');
   }
 
-  // ===== RENDER =====
-  function renderResults(products, labelText) {
-    const grid   = document.getElementById('products-grid');
-    const header = document.getElementById('results-header');
-    const label  = document.getElementById('results-label');
-    const empty  = document.getElementById('empty-state');
+  // ===== RENDER PAGE =====
+  function renderPage(page) {
+    currentPage = page;
+    const start        = (page - 1) * PAGE_SIZE;
+    const pageProducts = currentProducts.slice(start, start + PAGE_SIZE);
 
-    if (!products || products.length === 0) {
-      grid.innerHTML = '';
-      header.hidden  = true;
-      empty.hidden   = false;
-      return;
-    }
-
-    empty.hidden = true;
-    header.hidden = false;
-    label.textContent = labelText || `${products.length} products`;
-
+    const grid = document.getElementById('products-grid');
     grid.innerHTML = '';
 
-    products.forEach((p, i) => {
+    pageProducts.forEach((p, i) => {
       const card = document.createElement('article');
       card.className = 'product-card glass-card reveal';
       card.setAttribute('role', 'listitem');
-      // Stagger reveal: first 30 cards animate in, rest appear instantly
       card.dataset.revealDelay = i < 30 ? i * 40 : 0;
 
       const price   = p.price > 0 ? `$${Number(p.price).toFixed(2)}` : 'N/A';
@@ -168,9 +170,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const viewBtn = href
         ? `<a href="${href}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">View</a>`
         : '';
-      const chip = p.similarity != null
-        ? `<span class="similarity-chip">${Math.round(p.similarity * 100)}%</span>`
-        : '';
+
+      // Convert cosine distance → similarity percentage
+      const simPct = p.similarity != null ? Math.round((1 - p.similarity) * 100) : null;
+      const t      = p.similarity != null ? Math.max(0, Math.min(1, 1 - p.similarity)) : null;
+      const chipStyle = t != null ? `style="background:${getGradientColor(t)};color: white"` : '';
+      const chip = simPct != null ? `<span class="similarity-chip" ${chipStyle}>${simPct}%</span>` : '';
 
       card.innerHTML = `
         <div class="product-img-wrap">
@@ -194,6 +199,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
     grid.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
     refreshGlowDelays();
+    renderPagination(page, currentProducts.length);
+  }
+
+  // ===== RENDER PAGINATION =====
+  function renderPagination(page, total) {
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+    const container  = document.getElementById('pagination');
+
+    if (totalPages <= 1) {
+      container.hidden = true;
+      return;
+    }
+
+    container.hidden = false;
+    container.innerHTML = `
+      <button class="pagination-btn"${page === 1 ? ' disabled' : ''} aria-label="Previous page">&#8249;</button>
+      <span class="pagination-page">${page}</span>
+      <button class="pagination-btn"${page === totalPages ? ' disabled' : ''} aria-label="Next page">&#8250;</button>
+    `;
+
+    const [prevBtn, nextBtn] = container.querySelectorAll('.pagination-btn');
+    prevBtn.addEventListener('click', () => {
+      if (page > 1) {
+        renderPage(page - 1);
+        document.getElementById('results-header').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+    nextBtn.addEventListener('click', () => {
+      if (page < totalPages) {
+        renderPage(page + 1);
+        document.getElementById('results-header').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
+
+  // ===== RENDER RESULTS =====
+  function renderResults(products, labelText) {
+    const grid   = document.getElementById('products-grid');
+    const header = document.getElementById('results-header');
+    const label  = document.getElementById('results-label');
+    const empty  = document.getElementById('empty-state');
+
+    if (!products || products.length === 0) {
+      grid.innerHTML = '';
+      header.hidden  = true;
+      empty.hidden   = false;
+      document.getElementById('pagination').hidden = true;
+      return;
+    }
+
+    empty.hidden = true;
+    header.hidden = false;
+    label.textContent = labelText || `${products.length} products`;
+
+    currentProducts = products;
+    renderPage(1);
   }
 
   // ===== SHOW ERROR IN EMPTY STATE =====
@@ -203,7 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {
     empty.textContent = msg;
   }
 
-  // ===== FETCH AND RENDER PRODUCTS (no progress bar side-effects) =====
+  // ===== FETCH AND RENDER PRODUCTS =====
   async function fetchAndRenderProducts() {
     try {
       const res = await fetch('/api/products');
@@ -218,8 +279,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ===== STATUS STREAM (SSE) =====
-  // Opens an EventSource to /api/status and drives the progress bar
-  // with real server-side stage labels and percentages.
   function openStatusStream() {
     const es = new EventSource('/api/status');
 
@@ -236,7 +295,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (data.ready) {
         es.close();
-        // Hold at 100% briefly, then hide and render
         setTimeout(() => {
           completeProgress();
           fetchAndRenderProducts();
@@ -252,8 +310,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ===== APP INIT =====
-  // Ping the server first so we can show a clear offline message,
-  // then open the SSE stream for real progress.
   async function startApp() {
     showProgress('Connecting to server…');
 
@@ -268,21 +324,30 @@ document.addEventListener('DOMContentLoaded', () => {
     openStatusStream();
   }
 
+  // ===== MODE TOGGLE =====
+  document.querySelectorAll('.mode-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.mode-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      searchMode = pill.dataset.mode;
+      const q = document.getElementById('search-input').value.trim();
+      if (q) doSearch(q);
+    });
+  });
+
   // ===== SEARCH =====
-  // Returns the top-N matches from the API, then appends the remaining
-  // cached products (not in results) sorted alphabetically below them.
   async function doSearch(query) {
+    const modeLabel = searchMode === 'name' ? 'name' : 'semantic';
     startFakeProgress(`Searching for "${query}"…`);
     document.getElementById('products-grid').innerHTML = '';
     document.getElementById('empty-state').hidden = true;
 
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&n=24`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&n=100&mode=${modeLabel}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const hits = await res.json();
       if (hits.error) throw new Error(hits.error);
 
-      // Float search results to the top; append the rest of the catalog below
       const hitIds = new Set(hits.map(h => h.id));
       const rest   = allProducts.filter(p => !hitIds.has(p.id));
       const merged = [...hits, ...rest];
@@ -308,7 +373,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (q) {
       doSearch(q);
     } else {
-      // Empty query → restore full catalog
       renderResults(allProducts, `All products — ${allProducts.length} items`);
     }
   });

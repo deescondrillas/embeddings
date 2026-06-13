@@ -1,4 +1,9 @@
 # pip install flask flask_cors
+
+import os
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 import logic
@@ -54,7 +59,8 @@ def products_route():
 
 @app.route("/api/search")
 def search_route():
-    q = request.args.get("q", "").strip()
+    q    = request.args.get("q", "").strip()
+    mode = request.args.get("mode", "semantic")
     try:
         n = min(int(request.args.get("n", 24)), 100)
     except (ValueError, TypeError):
@@ -64,16 +70,28 @@ def search_route():
         return products_route()
 
     try:
-        results = logic.search(q, n)
-        return jsonify([{
-            "id":          r["id"],
-            "name":        r["entity"]["name"],
-            "category":    r["entity"]["category"],
-            "description": r["entity"]["short_description"],
-            "price":       r["entity"]["price"],
-            "link":        r["entity"]["link"],
-            "similarity":  round(r["distance"], 4),
-        } for r in results])
+        if mode == "name":
+            results = logic.search_by_name(q, n)
+            return jsonify([{
+                "id":          r["product_id"],
+                "name":        r["name"],
+                "category":    r["category"],
+                "description": r["short_description"],
+                "price":       r["price"],
+                "link":        r["link"],
+                "similarity":  r["distance"],
+            } for r in results])
+        else:
+            results = logic.search(q, n)
+            return jsonify([{
+                "id":          r["product_id"],
+                "name":        r["entity"]["name"],
+                "category":    r["entity"]["category"],
+                "description": r["entity"]["short_description"],
+                "price":       r["entity"]["price"],
+                "link":        r["entity"]["link"],
+                "similarity":  round(r["distance"], 4),
+            } for r in results])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

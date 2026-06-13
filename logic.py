@@ -1,7 +1,5 @@
-# pip install kaggle kagglehub
+# pip install kaggle kagglehub rapidfuzz
 
-# export KAGGLE_USERNAME=
-# export KAGGLE_KEY=
 import pandas as pd
 import numpy as np
 import kagglehub
@@ -10,18 +8,20 @@ import threading
 from sentence_transformers import SentenceTransformer
 from pymilvus import MilvusClient, DataType
 from kagglehub import KaggleDatasetAdapter
+from rapidfuzz import process, fuzz, utils as fuzz_utils
 
-DB_PATH         = "./ikea_products.db"
 EMBEDDING_MODEL = "paraphrase-multilingual-mpnet-base-v2"
+DB_PATH         = "./ikea_products.db"
 COLLECTION_NAME = "ikea_products"
 EMBEDDING_DIM   = 768
 VARCHAR_MAX     = 512
 DEFAULT_TOP_N   = 24
 
-_progress  = {"stage": "starting", "pct": 0, "label": "Starting…", "ready": False, "error": None}
-_init_done = threading.Event()
-_client    = None
-_model     = None
+_progress   = {"stage": "starting", "pct": 0, "label": "Starting…", "ready": False, "error": None}
+_init_done  = threading.Event()
+_client     = None
+_model      = None
+_name_index = []  # list of all product records, used for fuzzy name search
 
 
 def get_progress():
@@ -49,13 +49,19 @@ def _init():
 
             _set("clean", 36, f"Cleaning {len(df)} products…")
             df = df[["item_id", "name", "category", "price", "short_description", "link"]].copy()
-            df = df.groupby(
-                ["item_id", "name", "price", "short_description", "link"], as_index=False
-            )["category"].agg(lambda x: ", ".join(x.unique()))
             df = df.dropna(subset=["name", "short_description"], how="all").reset_index(drop=True)
             for col in ["name", "category", "short_description", "link"]:
-                df[col] = df[col].fillna("").astype(str).str[:VARCHAR_MAX]
+                df[col] = df[col].fillna("").astype(str).str.strip()
             df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0).astype(float)
+            df = df.groupby(
+                ["name", "price", "short_description"], as_index=False
+            ).agg(
+                item_id=("item_id", "first"),
+                category=("category", lambda x: " · ".join(dict.fromkeys(v for v in x if v))),
+                link=("link", "first"),
+            )
+            for col in ["name", "category", "short_description", "link"]:
+                df[col] = df[col].str[:VARCHAR_MAX]
             df["text"]  = df["name"] + " " + df["short_description"]
 
             # Encode in batches so the frontend can show real progress (45% → 80%)
@@ -111,6 +117,11 @@ def _init():
             ]
             _client.insert(collection_name=COLLECTION_NAME, data=records)
 
+        _client.load_collection(COLLECTION_NAME)
+
+        _set("index", 98, "Building name index…")
+        _build_name_index()
+
         _set("ready", 100, "Catalog ready")
         _progress["ready"] = True
 
@@ -122,6 +133,21 @@ def _init():
 
 
 threading.Thread(target=_init, daemon=True).start()
+
+
+def _build_name_index():
+    global _name_index
+    try:
+        stats = _client.get_collection_stats(COLLECTION_NAME)
+        total = int(stats.get("row_count", 2000))
+    except Exception:
+        total = 2000
+    _name_index = _client.query(
+        collection_name=COLLECTION_NAME,
+        filter="product_id > 0",
+        output_fields=["product_id", "name", "category", "short_description", "link", "price"],
+        limit=total,
+    )
 
 
 def get_all():
@@ -154,6 +180,32 @@ def search(query: str, n: int = DEFAULT_TOP_N):
         output_fields=["name", "category", "short_description", "link", "price"],
     )
     return results[0]
+
+
+def search_by_name(query: str, n: int = DEFAULT_TOP_N):
+    _init_done.wait()
+    if _progress.get("error"):
+        raise RuntimeError(_progress["error"])
+    names = [r["name"] for r in _name_index]
+    matches = process.extract(
+        query, names,
+        scorer=fuzz.WRatio,
+        processor=fuzz_utils.default_process,
+        limit=n,
+    )
+    results = []
+    for _matched_name, score, idx in matches:
+        r = _name_index[idx]
+        results.append({
+            "product_id":        r["product_id"],
+            "name":              r["name"],
+            "category":          r["category"],
+            "short_description": r["short_description"],
+            "link":              r["link"],
+            "price":             r["price"],
+            "distance":          round(1 - score / 100, 4),
+        })
+    return results
 
 
 def show_results(results):
