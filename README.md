@@ -7,7 +7,7 @@ pip install kagglehub numpy pandas pymilvus rapidfuzz sentence-transformers
 ```
 then, run the `app.py` file
 
-```python
+```bash
 python app.py
 ```
 
