@@ -1,4 +1,4 @@
-# How to Run the Application
+# How to Run the Application Locally
 
 Make sure the following dependencies are installed in your virtual environment:
 
